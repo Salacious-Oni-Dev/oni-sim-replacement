@@ -1,0 +1,333 @@
+// sim/tunables.def -- THE ONLY SOURCE of every number the sim runs on that managed code could
+// not reach before. One row per tunable. Read by `tunables.h` (the `Tunables` struct, its ID
+// enum and its default table). Nothing else defines these values: a kernel that wants one reads
+// it from the live table (see tunables.h, "THE ONE RULE").
+//
+//   TUNABLE   (Name, field,        type, default_bits, min, max, Group, Origin, "meaning")
+//   TUNABLE_AT(Name, array, index, type, default_bits, min, max, Group, Origin, "meaning")
+//
+// * `default_bits` is the value's BIT PATTERN for a float or a double, and the plain value for
+//   an int32_t. Four Klei constants below exist only as bits (the RNG, stable-tick and noise
+//   scales, the unbuilt-wall floor), because the nearest float to the quotient is not what Klei
+//   stores and the difference decides coin flips; writing every row the same way means no row
+//   can drift by being re-derived from a decimal.
+// * `min` / `max` are inclusive sanity bounds, checked against the default at compile time
+//   and (once the message exists) against every value sent. A CEILING row has max ==
+//   its default: it may be lowered, never raised, because raising it would take the sim past a
+//   limit the game relies on.
+// * Origin: KLEI rows match the stock DLL and their default is a bit-exactness GATE; STN is
+//   Stationeers' value; PHYS a physical constant; OURS a number this project chose.
+// * ROWS ARE APPEND-ONLY. The ID enum is generated in row order, so a row inserted in the
+//   middle renumbers every ID after it. Add new rows at the end of the file.
+//
+// Deliberately NOT here, each for its own reason:
+//   * capacity limits that size ABI arrays;
+//   * sentinels, which are identities of an algorithm rather than quantities:
+//     `kHugeTemperature` (the min/max seed of a conduction tile scan) and
+//     `World::kStableTicksReroll` (0x1f, the "roll a fresh countdown" value, which is also the
+//     bit mask of the 5-bit countdown field it lives in);
+//   * `FieldSource::cone_angle`'s 360, which every source overwrites from its own message;
+//   * `TickRates::convection_every_n_ticks` / `radiant_every_n_ticks`, which nothing reads yet.
+//   A knob with nothing behind it would pass every readback test and change nothing.
+
+// ---- Heat / conduction ----------------------------------------------------------------------
+TUNABLE(SubstepSeconds, substep_seconds, float, 0x3E4CCCCD, 0.01f, 1.0f, Heat, KLEI,
+        "Seconds of simulated time per substep (0.2). Every rate in the sim is per substep.")
+TUNABLE(MinConductionDelta, min_conduction_delta, float, 0x3F800000, 0.0f, 1000.0f, Heat, KLEI,
+        "Cell pairs closer than this in temperature (K) exchange no heat (1.0).")
+TUNABLE(ConductionTileShift, conduction_tile_shift, int32_t, 4, 1, 8, Heat, OURS,
+        "log2 of the conduction quiet-tile edge in cells (4 = 16x16). Perf only.")
+TUNABLE(BuildingTransferRate, building_transfer_rate, float, 0x3BA3D70A, 0.0f, 1.0f, Heat, KLEI,
+        "Building-to-building heat transfer scale (0.005). Its cell form is derived.")
+TUNABLE(MaxTemperature, max_temperature, float, 0x461C4000, 0.0f, 10000.0f, Heat, KLEI,
+        "Ceiling for building, conduit and chunk temperatures (10000 K).")
+TUNABLE(CellModMaxTemperature, cellmod_max_temperature, float, 0x461C4000, 0.0f, 10000.0f,
+        Heat, KLEI, "Ceiling a ModifyCell or cell add clamps its temperature to (10000 K).")
+TUNABLE(ConduitContactArea, conduit_contact_area, float, 0x42480000, 0.0f, 10000.0f, Heat, KLEI,
+        "Pipe-contents to pipe-wall contact area (50).")
+TUNABLE(ConduitTransferRate, conduit_transfer_rate, float, 0x3A83126F, 0.0f, 1.0f, Heat, KLEI,
+        "Pipe-contents to pipe-wall transfer scale (0.001).")
+TUNABLE(MinConduitHeatCapacity, min_conduit_heat_capacity, float, 0x38D1B717, 0.0f, 1.0f, Heat,
+        KLEI, "A pipe side with no more heat capacity than this exchanges nothing (1e-4).")
+TUNABLE(MinConduitEnergy, min_conduit_energy, float, 0x358637BD, 0.0f, 1.0f, Heat, KLEI,
+        "Smallest pipe-to-cell energy transfer that is applied (1e-6).")
+TUNABLE(ChunkTransferRate, chunk_transfer_rate, float, 0x3A83126F, 0.0f, 1.0f, Heat, KLEI,
+        "Element-chunk (debris) to cell transfer scale (0.001).")
+
+// ---- Phase change ---------------------------------------------------------------------------
+TUNABLE(TransitionMargin, transition_margin, float, 0x40400000, 0.0f, 1000.0f, Phase, KLEI,
+        "K past lowTemp/highTemp before a cell changes state (3.0).")
+TUNABLE(TransitionOvershoot, transition_overshoot, float, 0x3FC00000, 0.0f, 1000.0f, Phase, KLEI,
+        "K a cell's temperature is pulled back across the line when it changes state (1.5).")
+TUNABLE(ConduitTransitionMargin, conduit_transition_margin, float, 0x40400000, 0.0f, 1000.0f,
+        Phase, KLEI, "K past a pipe's contents' transition before it is flagged (3.0).")
+TUNABLE(ChunkTransitionMargin, chunk_transition_margin, float, 0x40400000, 0.0f, 1000.0f, Phase,
+        KLEI, "K past a debris chunk's transition before it is reported (3.0).")
+TUNABLE(StandardGravity, standard_gravity, float, 0x411CE80A, 0.0f, 1000.0f, Phase, PHYS,
+        "m/s^2, for hydrostatic pressure under liquid (9.80665).")
+TUNABLE(SublimationCellCapKg, sublimation_cell_cap_kg, float, 0x3FE66666, 0.0f, 1.0e6f, Phase,
+        KLEI, "Sublimation stops once the receiving gas cell holds this much (1.8 kg).")
+TUNABLE(OffGasCellCapKg, off_gas_cell_cap_kg, float, 0x3FE66666, 0.0f, 1.0e6f, Phase, KLEI,
+        "Liquid off-gassing stops once the gas cell above holds this much (1.8 kg).")
+TUNABLE(OffGasAmountCapKg, off_gas_amount_cap_kg, float, 0x3F800000, 0.0f, 1.0e6f, Phase, KLEI,
+        "Most a liquid cell off-gasses in one substep (1.0 kg).")
+TUNABLE(OffGasResidualKg, off_gas_residual_kg, float, 0x3C23D70A, 0.0f, 1.0e6f, Phase, KLEI,
+        "A liquid left with less than this after off-gassing is used up whole (0.01 kg).")
+TUNABLE(SmallFreezeOreRatio, small_freeze_ore_ratio, float, 0x3F4CCCCD, 0.0f, 1.0e6f, Phase,
+        KLEI, "A freeze at or under this share of the solid's default mass becomes ore (0.8).")
+TUNABLE(PartialMeltKg, partial_melt_kg, float, 0x40A00000, 0.0f, 1.0e6f, Phase, KLEI,
+        "Mass one partial melt takes off a solid (5 kg).")
+TUNABLE(PartialMeltMargin, partial_melt_margin, float, 0x40400000, 0.0f, 1000.0f, Phase, KLEI,
+        "K around a solid's highTemp that gates a partial melt and sets its melt temperature (3).")
+TUNABLE(PartialMeltGasMargin, partial_melt_gas_margin, float, 0x40C00000, 0.0f, 1000.0f, Phase,
+        KLEI, "K above its lowTemp the heating gas keeps after paying for a partial melt (6).")
+TUNABLE(FallingLiquidTemperatureWindow, falling_liquid_temperature_window, float, 0x40400000,
+        0.0f, 1000.0f, Phase, KLEI,
+        "K outside its liquid range a falling-liquid spawn is still accepted (3).")
+
+// ---- Gas movement ---------------------------------------------------------------------------
+TUNABLE(GasPressureCap, gas_pressure_cap, float, 0x3E000000, 0.0f, 1.0f, Gas, KLEI,
+        "Largest share of a gas cell the pressure sweeps move in one step (0.125).")
+TUNABLE(GasWispMassKg, gas_wisp_mass_kg, float, 0x3A83126F, 0.0f, 1.0e6f, Gas, KLEI,
+        "A gas cell under this mass is evaporated as a wisp (0.001 kg).")
+TUNABLE(GasShuffleSkipGate, gas_shuffle_skip_gate, float, 0x3F666666, 0.0f, 1.0f, Gas, KLEI,
+        "A random draw at or under this skips the gas shuffle (0.9).")
+TUNABLE(GasShuffleCandidateCoin, gas_shuffle_candidate_coin, float, 0x3F000000, 0.0f, 1.0f, Gas,
+        KLEI, "A random draw at or under this skips one shuffle candidate (0.5).")
+TUNABLE(GasDisplacementProbability, gas_displacement_probability, float, 0x3F7D70A4, 0.0f, 1.0f,
+        Gas, KLEI, "Chance a gas cell swaps with a same-state cell below (0.99).")
+TUNABLE(LiquidDisplacementProbability, liquid_displacement_probability, float, 0x3E99999A, 0.0f,
+        1.0f, Liquid, KLEI, "Chance a liquid cell swaps with a same-state cell below (0.30).")
+
+// ---- Liquid movement ------------------------------------------------------------------------
+TUNABLE(LiquidHorizontalRate, liquid_horizontal_rate, float, 0x3E800000, 0.0f, 1.0f, Liquid, KLEI,
+        "Share of a level difference a liquid moves sideways per step (0.25).")
+TUNABLE(LiquidPressureRatio, liquid_pressure_ratio, float, 0x3F8147AE, 0.0f, 100.0f, Liquid,
+        KLEI, "How much heavier a liquid cell must be than its neighbour to push (1.01).")
+TUNABLE(LiquidMinUpwardFlow, liquid_min_upward_flow, float, 0x3C23D70A, 0.0f, 1.0e6f, Liquid,
+        KLEI, "An upward liquid flow at or under this is dropped (0.01 kg).")
+TUNABLE(LiquidPourShare, liquid_pour_share, float, 0x3F000000, 0.0f, 1.0f, Liquid, KLEI,
+        "Share of the excess a liquid pours down into a fuller cell (0.5).")
+TUNABLE(LiquidUpwardShare, liquid_upward_share, float, 0x3F000000, 0.0f, 1.0f, Liquid, KLEI,
+        "Share of the excess an over-full liquid pushes up (0.5).")
+TUNABLE(LiquidViscosityBypassRatio, liquid_viscosity_bypass_ratio, float, 0x40000000, 0.0f,
+        100.0f, Liquid, KLEI,
+        "An upward push from a cell this many times over its ceiling ignores viscosity (2.0).")
+TUNABLE(ThinLiquidKg, thin_liquid_kg, float, 0x3C23D70A, 0.0f, 1.0e6f, Liquid, KLEI,
+        "A liquid cell under this mass is handled as a thin film in post-process (0.01 kg).")
+TUNABLE(CellModMinLiquidKg, cellmod_min_liquid_kg, float, 0x3C23D70A, 0.0f, 1.0e6f, Liquid, KLEI,
+        "Least liquid a displaced liquid cell must hold to be moved (0.01 kg).")
+TUNABLE(CellModEmptyMass, cellmod_empty_mass, float, 0x00800000, 0.0f, 1.0f, Liquid, KLEI,
+        "A cell at or under this mass counts as empty (FLT_MIN).")
+
+// ---- Falling solids / RNG (changing these moves the random stream) ---------------------------
+TUNABLE(StableTicksRerollScale, stable_ticks_reroll_scale, float, 0x38C00180, 0.0f, 0.00085f,
+        Rng, KLEI, "Scale of a fresh unstable-solid countdown draw (bits of 3/32767).")
+TUNABLE(StableTicksRerollBase, stable_ticks_reroll_base, int32_t, 3, 0, 30, Rng, KLEI,
+        "Least substeps an unstable solid waits before falling (3).")
+TUNABLE(RandomScale, random_scale, float, 0x38000100, 0.0f, 0.0001f, Rng, KLEI,
+        "Scale turning a 15-bit rand() into [0, 1] (the float nearest 1/32767).")
+
+// ---- Volume fractions / multi-gas -----------------------------------------------------------
+TUNABLE(RoomMixingRate, room_mixing_rate, float, 0x3E4CCCCD, 0.0f, 1.0f, Mixture, OURS,
+        "Share a sealed room's gases move toward its pooled mix per tick (0.2).")
+TUNABLE(RoomMixingSleepThreshold, room_mixing_sleep_threshold, int32_t, 5, 0, 1000000, Mixture,
+        OURS, "Unchanged ticks before a room's pooled mixing sleeps (5).")
+TUNABLE(RoomMixingEveryNTicks, room_mixing_every_n_ticks, int32_t, 1, 0, 255, Mixture, OURS,
+        "Room pooled mixing runs every Nth tick; 0 never (1).")
+TUNABLE(MinTransferMass, min_transfer_mass, float, 0x358637BD, 0.0f, 1.0f, Mixture, OURS,
+        "A mixing transfer at or under this (kg) is skipped as equilibrated (1e-6).")
+TUNABLE(CellVolumeM3, cell_volume_m3, float, 0x3F800000, 0.0001f, 1000.0f, Mixture, OURS,
+        "Volume of one cell for ideal-gas pressure (1 m^3).")
+TUNABLE(GasConstantR, gas_constant_r, float, 0x410507C8, 0.0f, 1000.0f, Mixture, PHYS,
+        "Ideal gas constant, J/(mol K) (8.3144, Stationeers' value).")
+TUNABLE(SolidEnter, solid_enter, float, 0x3F0CCCCD, 0.0f, 1.0f, Mixture, OURS,
+        "Solid share at which a mixed cell projects as solid (0.55).")
+TUNABLE(SolidExit, solid_exit, float, 0x3EE66666, 0.0f, 1.0f, Mixture, OURS,
+        "Solid share under which a solid-projected cell stops being solid (0.45).")
+TUNABLE(ProjectReach, project_reach, int32_t, 4, 4, 64, Mixture, OURS,
+        "Cells a dirty rectangle is widened by before projection. A FLOOR: one more than the "
+        "furthest kernel write, so it may be raised, never lowered.")
+
+// ---- Environment / buildings / planet -------------------------------------------------------
+TUNABLE(ExhaustMaxPressure, exhaust_max_pressure, float, 0x3FC00000, 0.0001f, 1000.0f, Building,
+        KLEI, "Gas mass (kg) at which a building's exhaust is fully blocked (1.5).")
+TUNABLE(StefanBoltzmannKW, stefan_boltzmann_kw, double, 0x3DCF2C57B08C0902, 0.0, 1.0e-9,
+        Building, PHYS, "Stefan-Boltzmann constant in kW/(m^2 K^4).")
+TUNABLE(ArmstrongLimitPa, armstrong_limit_pa, double, 0x40B89C0000000000, 1.0, 1.0e9, Building,
+        STN, "Pressure under which a building cannot convect (6300 Pa).")
+TUNABLE(ConvectionOneAtmospherePa, convection_one_atmosphere_pa, float, 0x47C5E680, 1.0f, 1.0e9f,
+        Building, STN, "Gas pressure at which convection is full strength (101325 Pa).")
+TUNABLE(ConvectionLiquidVolumeRatioForFull, convection_liquid_volume_ratio_for_full, float,
+        0x3A83126F, 1.0e-9f, 1.0f, Building, STN,
+        "Liquid volume share at which convection is full strength (0.001).")
+TUNABLE(BuildingConvectionWPerM2K, building_convection_w_per_m2k, float, 0x42C80000, 0.0f,
+        1.0e6f, Building, STN, "Building-to-surroundings convection coefficient (100 W/m^2K).")
+TUNABLE(MaxBuildingConvectionReach, max_building_convection_reach, int32_t, 4, 0, 4, Building,
+        OURS, "CEILING on the cells a building convects across (4).")
+TUNABLE(MaxWorldBoundaryRate, max_world_boundary_rate, float, 0x3F000000, 0.0f, 0.5f, Building,
+        OURS, "CEILING on a world boundary's exchange rate (0.5).")
+TUNABLE(MaxConduitMixFraction, max_conduit_mix_fraction, float, 0x3E800000, 0.0f, 0.25f,
+        Building, OURS, "CEILING on a pipe network's per-step mixing fraction (0.25).")
+TUNABLE(FallbackCellLiquidDensityKgM3, fallback_cell_liquid_density_kg_m3, float, 0x447A0000,
+        0.001f, 1.0e6f, Building, OURS,
+        "Liquid density assumed for a cell's element that has none (1000 kg/m^3).")
+TUNABLE(FallbackConduitLiquidDensityKgM3, fallback_conduit_liquid_density_kg_m3, float,
+        0x447A0000, 0.001f, 1.0e6f, Building, OURS,
+        "Liquid density assumed for pipe contents that have none (1000 kg/m^3).")
+TUNABLE(WorldBorderMassKg, world_border_mass_kg, float, 0x461C3C00, 0.0f, 1.0e6f, Building, KLEI,
+        "Mass of a world-border cell (9999 kg).")
+TUNABLE(WorldBorderTemperatureK, world_border_temperature_k, float, 0x00000000, 0.0f, 10000.0f,
+        Building, KLEI, "Temperature of a world-border cell (0 K).")
+
+// ---- Disease --------------------------------------------------------------------------------
+TUNABLE(DiseaseDecayBase, disease_decay_base, float, 0x40000000, 0.0f, 100.0f, Disease, KLEI,
+        "Base of the per-substep germ half-life decay (2).")
+TUNABLE(DiseaseDiffusionShare, disease_diffusion_share, float, 0x3E000000, 0.0f, 1.0f, Disease,
+        KLEI, "Share of a germ-count difference that spreads per step (0.125).")
+TUNABLE(MaxInfestationTicks, max_infestation_ticks, int32_t, 254, 0, 254, Disease, KLEI,
+        "CEILING on a cell's infestation age counter (254; a uint8, 255 is reserved).")
+
+// ---- Radiation ------------------------------------------------------------------------------
+TUNABLE(MinRadiation, min_radiation, float, 0x00000000, 0.0f, 9000000.0f, Radiation, KLEI,
+        "Floor a cell's radiation is clamped to (0).")
+TUNABLE(MaxRadiation, max_radiation, float, 0x4B095440, 0.0f, 9000000.0f, Radiation, KLEI,
+        "CEILING a cell's radiation is clamped to (9e6).")
+TUNABLE(RadiationEpsilon, radiation_epsilon, float, 0x3C23D70A, 0.0f, 1000.0f, Radiation, KLEI,
+        "Occlusion cutoff and final floor of the radiation field (0.01).")
+TUNABLE(RadiationGermEmissionScale, radiation_germ_emission_scale, float, 0x3A83126F, 0.0f,
+        1000.0f, Radiation, KLEI, "Rads a cell gains per germ of radiation sickness (0.001).")
+TUNABLE(RadiationSpreadGate, radiation_spread_gate, float, 0x3C23D70A, 0.0f, 1.0e6f, Radiation,
+        KLEI, "A directional emitter's cell under this level does not spread (0.01).")
+TUNABLE(RadiationNoiseFalloffGate, radiation_noise_falloff_gate, float, 0x3E800000, 0.0f, 1.0f,
+        Radiation, KLEI, "Emitter falloff under which noise is added (0.25).")
+TUNABLE(RadiationNoiseBias, radiation_noise_bias, float, 0x3E000000, 0.0f, 1.0f, Radiation, KLEI,
+        "Bias subtracted from emitter noise (0.125).")
+TUNABLE(RadiationNoiseScale, radiation_noise_scale, float, 0x37000100, 0.0f, 0.0001f, Radiation,
+        KLEI, "Scale turning a 15-bit rand() into emitter noise (bits of 1/(4*32767)).")
+
+// The 5x5 radioactive-element stencil, row-major from (dx, dy) = (-2, -2): index
+// (dy + 2) * 5 + (dx + 2). Weights only; the offsets are geometry and stay fixed.
+TUNABLE_AT(RadiationStencil00, radiation_stencil, 0, float, 0x3DCCCCCD, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-2,-2) (0.10).")
+TUNABLE_AT(RadiationStencil01, radiation_stencil, 1, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-1,-2) (0.15).")
+TUNABLE_AT(RadiationStencil02, radiation_stencil, 2, float, 0x3E800000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (0,-2) (0.25).")
+TUNABLE_AT(RadiationStencil03, radiation_stencil, 3, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (1,-2) (0.15).")
+TUNABLE_AT(RadiationStencil04, radiation_stencil, 4, float, 0x3DCCCCCD, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (2,-2) (0.10).")
+TUNABLE_AT(RadiationStencil05, radiation_stencil, 5, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-2,-1) (0.15).")
+TUNABLE_AT(RadiationStencil06, radiation_stencil, 6, float, 0x3F000000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-1,-1) (0.50).")
+TUNABLE_AT(RadiationStencil07, radiation_stencil, 7, float, 0x3F400000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (0,-1) (0.75).")
+TUNABLE_AT(RadiationStencil08, radiation_stencil, 8, float, 0x3F000000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (1,-1) (0.50).")
+TUNABLE_AT(RadiationStencil09, radiation_stencil, 9, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (2,-1) (0.15).")
+TUNABLE_AT(RadiationStencil10, radiation_stencil, 10, float, 0x3E800000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-2,0) (0.25).")
+TUNABLE_AT(RadiationStencil11, radiation_stencil, 11, float, 0x3F400000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-1,0) (0.75).")
+TUNABLE_AT(RadiationStencil12, radiation_stencil, 12, float, 0x3F800000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (0,0) (1.00).")
+TUNABLE_AT(RadiationStencil13, radiation_stencil, 13, float, 0x3F400000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (1,0) (0.75).")
+TUNABLE_AT(RadiationStencil14, radiation_stencil, 14, float, 0x3E800000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (2,0) (0.25).")
+TUNABLE_AT(RadiationStencil15, radiation_stencil, 15, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-2,1) (0.15).")
+TUNABLE_AT(RadiationStencil16, radiation_stencil, 16, float, 0x3F000000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-1,1) (0.50).")
+TUNABLE_AT(RadiationStencil17, radiation_stencil, 17, float, 0x3F400000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (0,1) (0.75).")
+TUNABLE_AT(RadiationStencil18, radiation_stencil, 18, float, 0x3F000000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (1,1) (0.50).")
+TUNABLE_AT(RadiationStencil19, radiation_stencil, 19, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (2,1) (0.15).")
+TUNABLE_AT(RadiationStencil20, radiation_stencil, 20, float, 0x3DCCCCCD, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-2,2) (0.10).")
+TUNABLE_AT(RadiationStencil21, radiation_stencil, 21, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (-1,2) (0.15).")
+TUNABLE_AT(RadiationStencil22, radiation_stencil, 22, float, 0x3E800000, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (0,2) (0.25).")
+TUNABLE_AT(RadiationStencil23, radiation_stencil, 23, float, 0x3E19999A, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (1,2) (0.15).")
+TUNABLE_AT(RadiationStencil24, radiation_stencil, 24, float, 0x3DCCCCCD, 0.0f, 100.0f, Radiation, KLEI, "Stencil weight at (2,2) (0.10).")
+
+// ---- Rendering textures ---------------------------------------------------------------------
+TUNABLE(FillAlphaScale, fill_alpha_scale, float, 0x3A83126F, 0.0f, 1000.0f, Texture, KLEI,
+        "Liquid fill alpha: mass multiplier before the curve (0.001).")
+TUNABLE(FillAlphaExponent, fill_alpha_exponent, float, 0x3EE66666, 0.0f, 100.0f, Texture, KLEI,
+        "Liquid fill alpha curve exponent (0.45).")
+TUNABLE(FillGradientReference, fill_gradient_reference, float, 0x447A0000, 0.0001f, 1.0e9f,
+        Texture, KLEI, "Liquid fill gradient: mass divisor before the curve (1000).")
+TUNABLE(FillGradientExponent, fill_gradient_exponent, float, 0x3EE66666, 0.0f, 100.0f, Texture,
+        KLEI, "Liquid fill gradient curve exponent (0.45).")
+TUNABLE(DissolvedTintExponent, dissolved_tint_exponent, float, 0x3EE66666, 0.0f, 100.0f, Texture,
+        OURS, "Dissolved-gas tint curve exponent (0.45).")
+TUNABLE(TemperatureRampMargin, temperature_ramp_margin, float, 0x40400000, 0.0f, 1000.0f, Texture,
+        KLEI, "K beyond an element's range its temperature colour ramp extends (3).")
+
+// ---- Effervescence --------------------------------------------------------------------------
+TUNABLE(FizzReferenceK, fizz_reference_k, float, 0x43951333, 1.0f, 10000.0f, Fizz, PHYS,
+        "Henry's-law reference temperature (298.15 K).")
+TUNABLE(FizzMinimumGasVolumeM3, fizz_minimum_gas_volume_m3, float, 0x38D1B717, 1.0e-9f, 1000.0f,
+        Fizz, OURS, "Smallest gas volume a bubble pressure is computed over (1e-4 m^3).")
+TUNABLE(FizzSurfaceColumnCells, fizz_surface_column_cells, int32_t, 8, 1, 64, Fizz, OURS,
+        "Gas cells above a liquid surface pooled into its surface pressure (8).")
+TUNABLE(FizzUptakeKeepKg, fizz_uptake_keep_kg, float, 0x3B03126F, 0.0f, 1.0e6f, Fizz, OURS,
+        "Gas a cell always keeps when a liquid dissolves from it (0.002 kg).")
+TUNABLE(FizzUptakeMaxShare, fizz_uptake_max_share, float, 0x3F000000, 0.0f, 1.0f, Fizz, OURS,
+        "Largest share of a gas cell dissolved in one step (0.5).")
+TUNABLE(FizzFallbackSolventDensityKgM3, fizz_fallback_solvent_density_kg_m3, float, 0x447A0000,
+        0.001f, 1.0e6f, Fizz, OURS,
+        "Solvent density assumed for an element with no default mass (1000 kg/m^3).")
+
+// ---- Liquid pressure break and over-full displacement --------------------------------------
+TUNABLE(OverfullDisplaceRatio, overfull_displace_ratio, float, 0x3FC00000, 0.0f, 1000.0f, Liquid,
+        KLEI, "A liquid over this many times its maxMass displaces the liquid above (1.5).")
+TUNABLE(OverfullHeavierRatio, overfull_heavier_ratio, float, 0x3F8147AE, 0.0f, 100.0f, Liquid,
+        KLEI, "How much heavier than the cell above an over-full liquid must be (1.01).")
+TUNABLE(OverfullShare, overfull_share, float, 0x3EFEB9F3, 0.0f, 1.0f, Liquid, KLEI,
+        "Share of an over-full cell moved up into the cleared cell (bits of 1/2.01).")
+TUNABLE(PressureBreakBaseResistance, pressure_break_base_resistance, float, 0x3F800000, 0.0f,
+        1.0e6f, Liquid, KLEI, "Resistance a pressure break starts from before any wall (1).")
+TUNABLE(PressureBreakStrengthScale, pressure_break_strength_scale, float, 0x3E800000, 0.0f,
+        1.0e6f, Liquid, KLEI, "Scale on each wall cell's strength term (0.25).")
+TUNABLE(PressureBreakUnbuiltFloor, pressure_break_unbuilt_floor, float, 0x3DCCCCD0, 0.0f, 1.0e6f,
+        Liquid, KLEI, "Resistance a natural (unbuilt) wall cell adds (bits 0x3dccccd0, ~0.1).")
+
+// ---- The 0.125 pressure share, split by Klei function ---------------------------------------
+// `GasPressureCap` is `UpdatePressure`'s. These two are the same value in two other Klei
+// functions, split for the reason every shared value in this table is: one knob must not move
+// three behaviours.
+TUNABLE(GasPressureDisplacementShare, gas_pressure_displacement_share, float, 0x3E000000, 0.0f,
+        1.0f, Gas, KLEI, "Share of a gas cell `DoGasPressureDisplacement` moves in (0.125).")
+TUNABLE(LiquidPressureDisplacementShare, liquid_pressure_displacement_share, float, 0x3E000000,
+        0.0f, 1.0f, Liquid, KLEI,
+        "Share of a liquid's surplus `DoLiquidPressureDisplacement` moves (0.125).")
+
+// ---- Further literals --------------------------------------------------------
+// `ConductionMaxTemperature` is a CEILING like `MaxTemperature`, and a separate
+// row because it is a separate Klei constant use.
+TUNABLE(ConductionMinTemperature, conduction_min_temperature, float, 0x3F800000, 0.0f,
+        10000.0f, Heat, KLEI,
+        "Floor a conducting cell's temperature is clamped to after each pair (1 K).")
+TUNABLE(ConductionMaxTemperature, conduction_max_temperature, float, 0x461C4000, 0.0f,
+        10000.0f, Heat, KLEI,
+        "Ceiling a conducting cell's temperature is clamped to after each pair (10000 K).")
+TUNABLE(CellEnergyMinMassKg, cell_energy_min_mass_kg, float, 0x3A83126F, 0.0f, 1.0e6f,
+        Building, KLEI, "A cell at or under this mass refuses ModifyCellEnergy/exhaust (0.001 kg).")
+TUNABLE(CellEnergyMinTemperature, cell_energy_min_temperature, float, 0x3F800000, 0.0f,
+        10000.0f, Building, KLEI,
+        "Floor ModifyCellEnergy/exhaust clamps an out-of-range result to (1 K).")
+TUNABLE(RadiationDecayStep, radiation_decay_step, float, 0x3F800000, 0.0f, 9000000.0f,
+        Radiation, KLEI, "Rads a cell loses per tick when have/linger underflows to 0 (1).")
+TUNABLE(GasEqualizeDamping, gas_equalize_damping, float, 0x3F000000, 0.0f, 1.0f, Mixture, OURS,
+        "Share of the full equalising transfer MixPair/EqualizeSingleSpecies move (0.5).")
+TUNABLE(LiquidEqualizeDamping, liquid_equalize_damping, float, 0x3F000000, 0.0f, 1.0f, Mixture,
+        OURS, "Share of the full equalising transfer EqualizeLiquidVolume moves (0.5).")
+// `DoLiquidPressureDisplacement`'s germ slice. Its own row, not
+// `LiquidPressureDisplacementShare`: the same 0.125 in the same function, but a share of the
+// source's START germ count where the mass share is a share of what is left after this
+// substep's flow, so the two are not one quantity.
+TUNABLE(LiquidDisplacementGermShare, liquid_displacement_germ_share, float, 0x3E000000, 0.0f,
+        1.0f, Disease, KLEI,
+        "Share of a source's germs a liquid pressure displacement carries with its slice (0.125).")
+// `DoGasPressureDisplacement`'s germ slice. Its own row, not
+// `GasPressureDisplacementShare`, for the reason `LiquidDisplacementGermShare` gives.
+TUNABLE(GasDisplacementGermShare, gas_displacement_germ_share, float, 0x3E000000, 0.0f, 1.0f,
+        Disease, KLEI,
+        "Share of a source's germs a gas pressure displacement carries with its slice (0.125).")
+// The mass a state change's ore share must exceed before it is spawned,
+// which is also the gate on the germs that ride with it.
+TUNABLE(TransitionOreMinKg, transition_ore_min_kg, float, 0x3A83126F, 0.0f, 1.0e6f, Phase, KLEI,
+        "A state change's ore share is spawned only above this mass (0.001 kg).")
+// A per-cell remainder for ModifyCellEnergy (simdll.cpp's ApplyCellEnergy, buildings.h's
+// DeliverCellEnergy). Klei writes each payment as one float temperature step, so a payment small
+// against the cell's heat capacity lands a whole number of float steps: 0.1 kJ into 1000 kg of
+// water at 283 K lands 27% too much, 5 kJ lands 0.5% too little, and a stream of equal payments
+// repeats the same error every time. On, the cell keeps what did not land and adds it to its
+// next payment. Off is Klei's arithmetic, bit for bit.
+TUNABLE(CellEnergyCarry, cell_energy_carry, int32_t, 0, 0, 1, Building, OURS,
+        "1 = ModifyCellEnergy carries each cell's float-rounding remainder into its next payment (0).")

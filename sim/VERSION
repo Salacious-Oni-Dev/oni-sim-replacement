@@ -1,0 +1,2 @@
+# MAJOR.MINOR of this SimDLL. build.sh appends the revision and commit: MAJOR.MINOR.REV+SHA.
+0.1

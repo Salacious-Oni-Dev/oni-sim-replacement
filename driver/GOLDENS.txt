@@ -1,0 +1,304 @@
+# driver/GOLDENS.txt -- the offline suites' reference values, and the only place they live.
+#
+# A reference value kept in prose drifts: nothing fails when the scenario set grows and the
+# number is not re-recorded, and a suite that prints "413 PASS" with nothing saying it should
+# be 413 reads as success when an arm stops running.
+#
+# So: PROSE KEEPS A POINTER TO THIS FILE AND NEVER A COPY OF A VALUE. A number quoted into a
+# document is a number that will be wrong later.
+#
+# HOW TO USE IT. Each suite asserts its own keys and exits non-zero on a mismatch:
+#
+#     cd driver
+#     ./build/diffsim.exe --corpus sim_corpus.bin --scenario all
+#     ./build/vftest.exe  --corpus sim_corpus.bin \
+#                         --fixtures ../tests/fixtures
+#     ./build/gastest.exe
+#
+# HOW TO CHANGE IT. Never by hand. Re-run the suite with --record-goldens, which rewrites its
+# own keys and leaves every comment in this file where it was, and commit the diff -- that
+# diff is the review. A value edited by hand to make a red suite green is indistinguishable
+# in the history from a value re-recorded because the suite legitimately changed, and the
+# whole point of the flag is to make those two things look different.
+#
+# WHAT THE census KEYS MEAN. `census.granite` and `census.asteroid` are md5 over `bench`'s
+# per-kernel CELL COUNTS -- for each cell sweep, how many cells it examined, skipped, changed,
+# and how many times it ran (sim/census.h). They are pinnable for a reason no timing is: they
+# are exact integers with no clock in them, so the same build on any machine produces the same
+# digest. A kernel that changes what it iterates over moves its key; the census table `bench`
+# prints above the verdict is the diff. Recorded from the DEFAULT invocation only --
+# `--verify` toggles cell properties on purpose and is reported as non-canonical rather than
+# checked, so run bench a second time without it.
+#
+# WHAT THE state KEYS MEAN. `state.granite` and `state.asteroid` are md5 over the BIT PATTERNS
+# of every game cell's element, mass and temperature once the run is over. The census counts
+# what the kernels looked at; this counts what they left behind, and the two catch different
+# things -- a change that visits exactly the same cells and writes different numbers into them
+# moves this key and not the census one. Bit patterns rather than printed values, because two
+# floats that format the same are not the same float and the whole point is to fail on the ulp.
+#
+# WHAT THE simcheck KEYS MEAN, AND WHY THEY ARE NOT A THIRD STATE DIGEST. `simcheck.granite`
+# and `simcheck.asteroid` are md5 over the CLASS COUNTS Klei's own `SimCheckErrorMap` overlay
+# assigns to the finished world -- red, yellow, blue, gray, green, magenta, cyan, black, plus
+# the StateChange proximity count (driver/src/simcheck.h transcribes the rule). The two keys
+# above are RELATIVE: they say something moved and never that what is there is wrong, so a NaN
+# that has been in a kernel since the day it was written is a stable digest and both go green
+# on it forever. That is not hypothetical: a NaN
+# (`GameUtil.GetFinalTemperature: t2=NaN`) can pass this whole gate and show only in the
+# running game's overlay.
+#
+# READ A MOVE, NOT A COUNT. Red is also what a sealed world's 20 000 kg neutronium border
+# looks like, so `bench` pins the counts rather than asserting zero. The two classes that ARE
+# asserted to zero are yellow and blue -- vacuum holding a temperature, vacuum holding mass --
+# which no kernel has any excuse for and which no world border produces. Those fail the run
+# directly, not through a digest.
+#
+# `simcheck.granite` is identical across `.c12`, `.b` and `.s4000`, and that is the expected
+# result rather than a missing pin: the granite world is 98 304 cells of one solid at one
+# temperature, and no arm here moves any of them across a class boundary. `simcheck.asteroid`
+# differs in all three, because it has vacuum, near-vacuum gas and cells near a phase edge.
+#
+# WHY THERE IS A `.c12` OF EACH. `bench --regions cluster:12` sends TWELVE active regions --
+# `Game.UnsafeSim200ms` builds one per discovered world, so that is a late Spaced Out cluster,
+# against the single region of the base game. Both are goldened because they gate different
+# things: the sim takes a `CellSOA::CopyFrom` per REGION, so a fault in that snapshot leaves
+# the one-region run bit-identical and moves the twelve-region one.
+#
+# THAT IS NOT HYPOTHETICAL, AND IT IS WHY THESE KEYS EXIST. Two faults were planted in the
+# per-region snapshot when it landed and the two gates do not agree about them:
+#
+#   fault                                    diffsim            state.*.c12
+#   refresh nothing for every region after 0 CATCHES            CATCHES
+#   strip the snapshot rectangle's margins   MISSES (unchanged) CATCHES
+#
+# So this arm is not a substitute for diffsim, and it is not redundant with it either: it is
+# strictly more sensitive on the one axis it was built for. diffsim's multi-region worlds have
+# no region whose halo reads cells its neighbour has just written; twelve strips across one
+# asteroid do, which is what makes the second row differ. Widening those margins from 3 to 4,
+# 8 or 16 moves nothing, which is how 3 is known to be enough rather than assumed.
+#
+# WHY THERE IS A `.b` OF EACH. `bench --buildings corpus` registers every
+# `AddBuildingHeatExchange` the corpus recorded -- 1529 for sim_corpus_744825.bin, a real ONI
+# base as the game itself described it at save load. Until it existed, `bench` had no
+# buildings at all, so `StepBuildingHeatExchange` and `StepBuildingToBuilding` were an
+# iteration over an empty vector.
+#
+# It is a SEPARATE KEY rather than a re-record because the building kernels write cell
+# temperatures: a buildings-on run legitimately leaves the world somewhere else, and both
+# places are worth pinning. `state.granite` and `state.granite.b` are different digests of the
+# same 50 ticks for exactly that reason.
+#
+# `census.granite.b` is IDENTICAL to `census.granite`, and that is the expected result rather
+# than a missing pin. The two building kernels walk a LIST, not the grid, so sim/census.h
+# deliberately does not count them -- and on a world where nothing else moves they cannot
+# change what any sweep examined, only what it left behind. On the asteroid the buildings do
+# provoke the other sweeps, and `census.asteroid.b` duly differs from `census.asteroid`.
+#
+# `--buildings N` (any count other than the recorded one) is reported as non-canonical and not
+# checked, the same way `--verify` is: a hand-picked population is a dial for a measurement,
+# not a configuration anything should be pinned to.
+#
+# A PITFALL: `diffsim` loads `..\sim\build\SimDLL.dll`, a PREBUILT artifact. Editing sim/*.h
+# and re-running diffsim tests the DLL that was already there, silently and with a perfectly
+# green result, which reads as "diffsim cannot see this change" when it means "diffsim did
+# not run this change". Rebuild the DLL, or pass `--mine`, before believing a diffsim result about a
+# header edit.
+#
+# WHY THERE IS A `.s4000` OF EACH. `bench --settle 4000` runs four thousand
+# untimed ticks before the fifty it reports, so what is pinned is a SETTLED world rather than
+# the transient a freshly seeded one starts in. Every other key here describes a world that is
+# still equilibrating: at settle 0 the asteroid's conduction sweep changes 58.4 % of the cells
+# it examines, and by settle 4000 it changes 2.5 % and has stopped falling (8000 reads 2.55 %,
+# which is up). Those are two different physical regimes and only the second is the one an
+# idle colony runs in.
+#
+# WHY THIS KEY EXISTS. A change that is correct during the transient and wrong once a world
+# settles would pass every other suite here, because nothing else runs long enough to leave
+# the transient -- `diffsim` included. Idle-frame optimisations are exactly that shape of
+# change. Half a minute of gate
+# time buys the only assertion in this file about the regime the game spends its time in.
+#
+# `state.granite.s4000` is IDENTICAL to `state.granite`, and that is the expected result: a
+# world of solid granite at one temperature has nothing to settle INTO, so four thousand ticks
+# leave it exactly where fifty do. `census.granite.s4000` does differ, because the texture
+# pass primes itself on its first call and with a settle in front of it that call is no longer
+# one of the measured fifty.
+#
+# Any settle other than 0 or 4000 is reported non-canonical and not checked -- a settle is a
+# dial for reading the settle curve, and only the two ends of it are configurations.
+#
+# WHY THERE IS A `.f.r` OF EACH, AND A NEW `field.*` KIND. `bench --fields all
+# --radiation 8` is the run that switches on the two things no other world in this harness
+# has: the generic field solver (`sim/fields.h`) and the game's radiation-enabled byte, with an
+# emitter in the world. A cost that is not measured is a cost that gets argued about instead.
+#
+# `.f` is five fields, one per RULE, each on its own extension property: idle, decay-only, a
+# point source under the radiation law, a directional source under the light law, and an
+# element source. `.r` is eight `kRadiationConstant` emitters with the byte set. They are one
+# key rather than two because they are one gate arm; the single-rule modes (`--fields point`
+# and the rest) are dials for reading the per-rule cost and are reported, not asserted, the
+# same way `--buildings N` is.
+#
+# `field.granite.f.r` AND `field.asteroid.f.r` ARE A NEW KIND, and they exist because none of
+# the three kinds above can see a field at all. A field writes an extension property; `state.*`
+# digests element, mass and temperature, so it is blind to every value the solver produces by
+# construction. Without this key a rewritten walk, a swapped combine mode or a dropped clamp in
+# `sim/fields.h` would move NOTHING in this suite. It is md5 over every registered field
+# property's float bit patterns across the game cells, in registration order.
+#
+# `state.granite.f.r` IS IDENTICAL TO `state.granite` AND `state.asteroid.f.r` IS NOT, and the
+# difference is the measurement. A field writes no cell, so on its own it moves neither -- but
+# `TickConstant` draws from the world LCG for the outer three quarters of its ellipse, so the
+# emitters change how many draws the world makes and the gas shuffle downstream of them lands
+# differently. Granite has no gas to shuffle and comes out bit-identical; the asteroid does and
+# does not. That is also the precise reason `sim/fields.h` contains no noise term at all: a
+# field that drew from the same stream would turn a diffsim-green DLL divergent the moment any
+# mod registered anything.
+#
+# `census.*.f.r` MOVES FOR TWO REASONS AT ONCE. `StepFields` is the first slot admitted to the
+# census that is not a plain region sweep, so the table gains a row; and the radiation field
+# pass writes through `World::SetRadiation`, which marks a cell static-dirty when its value
+# changes, so `Project`'s dirty rectangles genuinely differ. `StepFields` reports no `of
+# region` percentage and a bound of `-`: its cost is a decay pass plus a raster per source plus
+# a Bresenham walk per emitted pixel, so a rectangle it may not exceed would be a number
+# invented to have one (see `sim/census.h`, `kBoundNone`). What its counts DO say is the
+# multiplier -- `examined` includes every ray step, so `examined / changes` is the average ray
+# length, which is the number that says whether a rule is a sweep or a raster.
+
+# WHAT THE diffsim KEYS MEAN. `diffsim.all.digest` is md5 over every byte diffsim itself
+# printed, with '\n' counted as "\r\n" because these are Windows binaries and the C runtime
+# expands them on the way out. It covers diffsim's own report and nothing else -- the two
+# loaded SimDLLs print on stderr, through their own C runtime, and never pass through the
+# wrapper that feeds the hash. So the by-hand equivalent needs no filter at all, and is exact
+# to the digit:
+#
+#     ./build/diffsim.exe --corpus ... --scenario all > out.txt     # NOT 2>&1
+#     md5sum out.txt      # == diffsim.all.digest
+#     wc -l  out.txt      # == diffsim.all.lines
+#
+# WHAT THE DIGEST DELIBERATELY DOES NOT COVER, and why that is not a hole. `--scenario all`
+# puts 105 lines on stderr: 99 `THREAD - started 'SimThread' (<tid>)`, one per sim started,
+# whose OS thread id changes every run and is the only genuinely non-deterministic byte
+# anywhere; and 6 deterministic lines of Klei's `INVALID TEMPERATURE FOR CELL ENERGY
+# MODIFICATION` diagnostic, from the three scenarios that drive a cell past the clamp on
+# purpose. The diagnostic is a printf, not a state change, and the state it describes is
+# already compared cell by cell by the scenario that provoked it -- if either sim clamped
+# differently, the comparison fails whether or not the message printed. Note that this is why
+# `diffsim.all.lines` is 746 and not the 752 recorded in older gate writeups: those captured
+# with `2>&1` and then grepped the thread lines back out, which left the six diagnostics in.
+#
+# `diffsim.all.frames` is klei frames / ticks / spins. It is already inside the digest, and is
+# broken out anyway because it makes a failure diagnosable: matching frames with a differing
+# digest means the text moved and the simulation did not.
+#
+# The goldens are recorded for ONE invocation -- `--scenario all` against the pinned corpus.
+# Any other flag suspends the check, loudly, naming the flag.
+
+diffsim.all.digest   3722653ddd53fa11c951561c5f787892
+diffsim.all.lines    1125
+diffsim.all.frames   5684/5800/116
+
+# vftest.checks / gastest.checks are the number of Check() arms that RAN. Not the number that
+# passed -- a failing arm already fails the suite on its own. The hole this closes is an arm
+# that stops running at all, which no pass/fail count can see.
+
+vftest.checks        949
+gastest.checks       181
+census.granite       e6024c4d8b65936229c5b2a19eaeb1be
+census.asteroid      7d1e1bb9f540d0ce721601fa7fbe8072
+state.granite        0099addfae40c8d5833a4f98b07d2049
+state.asteroid       9fa7e9e228e3bf9c27481308976a96ea
+census.granite.c12   d1f5b362e6d880b58d2cf719cbc8b719
+state.granite.c12    0099addfae40c8d5833a4f98b07d2049
+census.asteroid.c12  8d028a5475b9fd5e9f5a1fcf3fd1ef65
+state.asteroid.c12   ec146b79dd567f70b2143f3c7d7588c4
+census.granite.b     e6024c4d8b65936229c5b2a19eaeb1be
+state.granite.b      0692021be47fe4e6ca2fb1170ab013e6
+census.asteroid.b    98853f8ddadf19458ecfb065267f02f2
+state.asteroid.b     8ccd57917788c2bc285cda2144b6b5a3
+census.granite.c12.b d1f5b362e6d880b58d2cf719cbc8b719
+state.granite.c12.b  be1ecf8f1832947d3758c193e4e71e90
+census.asteroid.c12.b ac0b6c9a2383d349f90672fef2f44498
+state.asteroid.c12.b 87a20c968c2dc4d3b7f0af749bc1eb74
+census.granite.s4000 3a1497b0252d9ee781e41fd5b09a7ad0
+state.granite.s4000  0099addfae40c8d5833a4f98b07d2049
+census.asteroid.s4000 5d16d5fc43c95bdce4d56385aff26b19
+state.asteroid.s4000 56b4e43ee91cdc69473a0fb986cf0f77
+
+# WHAT THE state.dev KEYS MEAN, AND WHY diffsim CANNOT REPLACE THEM.
+# `diffsim` answers exactly one question -- does this DLL match Klei's, bit for bit, over a
+# corpus of real frames -- and it is the strongest oracle here. It is also STRUCTURALLY BLIND
+# to everything this project adds on purpose, because every one of those additions is by
+# definition a difference from Klei. An extension message that landed a degree hotter than it
+# used to, or stopped landing at all, leaves `diffsim.all.digest` exactly where it was. So does
+# the entire multi-gas layer. Two oracles, two questions.
+#
+# Each key is one deviation, driven the way a mod drives it -- through the published extension
+# message ids -- against one fixed 8x6 world for 30 ticks, digested over what the frame
+# PUBLISHES: every game cell's element, mass and temperature, plus every building temperature.
+# Bit patterns, not printed values, for the same reason state.granite uses them.
+#
+#   state.dev.vanilla      the CONTROL: same world, same building, same ticks, no extension
+#                          message at all. If this one moves and the others move with it, the
+#                          change is in vanilla stepping and diffsim is the place to look.
+#   state.dev.wasteheat    ext::kSetBuildingWasteHeatKilowatts -- the power -> heat rule
+#   state.dev.exhaust      ext::kSetBuildingExhaust -- exhaust heat bounced, not deleted
+#   state.dev.mixture      ext::kInjectGasSpecies -- two gases in one cell, which vanilla
+#                          cannot represent at all, and the enthalpy rule that blends them
+#   state.dev.radiation    ext::kSetBuildingRadiation -- a radiative outlet, sink at 0 K
+#   state.dev.envtemp      the SAME radiator against a 200 K sink instead
+#   state.dev.thermalmass  ext::kSetCellThermalMassBonus -- Mod 2's per-cell heat capacity
+#
+# ONE KEY PER DEVIATION rather than one over all seven, so a failure NAMES the rule that moved.
+#
+# THE GOLDENS ARE WORTHLESS WITHOUT THE THREE CHECKS BESIDE THEM, and those live in
+# `driver/src/vftest.cpp` rather than here: the baseline is run TWICE and must agree (a golden
+# over a fixture that wanders is a tripwire, not a gate); every deviation must differ from the
+# control (this is what fails when a message stops being DELIVERED -- `QueueDeferredMessage`
+# silently dropped every extension message for weeks in 2026-08, and a golden alone would have
+# been re-recorded as the vanilla value that day); and all seven must be pairwise distinct.
+#
+# That middle check earned its place three times while this fixture was being written. Sending
+# `kSetEnvironmentTemperature` alone changes nothing any digest can see -- the sim has exactly
+# one reader for it, the sink of a RADIATING body -- so it is paired with a radiator. A thermal
+# mass bonus on a cell with no gradient across it changes the rate of a transfer that is not
+# happening. And a building buried in ordinary breathable air radiates NOTHING, correctly, so
+# the fixture's cell mass is the derived half-Armstrong 0.04040 kg rather than a round number.
+# Each was a green golden over a dead deviation until the check caught it.
+#
+# WHAT formulas.digest MEANS. The seven PURE physics exports -- phase change, combined
+# temperature, single-species equalisation, adiabatic fill, liquid volume, liquid equalisation,
+# gas pressure -- swept over 36 input rows and digested over the OUTPUT BIT PATTERNS. They have
+# no world, no message and no dispatch entry, which is exactly what makes them the hardest
+# thing here to gate: a behavioural arm on a formula compares against a tolerance, and a
+# tolerance is a hole the width of the tolerance. This one fails on the last bit of the last
+# mantissa. Phase change is here rather than in a
+# state key because there is no world state to digest -- the STATE (which species a tank holds)
+# correctly stays managed and only the formula is native. See `sim/phase_change.h`.
+
+state.dev.vanilla    7f032e2c1a196383d969ca3183eeff26
+state.dev.wasteheat  aad6f6a6c5e3d57e6439d9deee2e824b
+state.dev.exhaust    ca122af28aba9d51da592711b509456f
+state.dev.mixture    09a9bbdfc78e3a029127520907ade6e7
+state.dev.radiation  fb0d2abdf8b9ad94bcfb5a9a2cf3b00f
+state.dev.envtemp    9d3f6869c8ff03a4e8c6f0fccecdecbd
+state.dev.thermalmass 3d367edd0c683bb0b093731d2ff97434
+formulas.digest      786a1480ddd14820a34c7ac3e3594d78
+simcheck.granite     51f541063cc42a986b221d39e72c7abc
+simcheck.asteroid    ed28473c4a08e70ce925f47413b38d9d
+simcheck.granite.c12 51f541063cc42a986b221d39e72c7abc
+simcheck.asteroid.c12 71884988bb840298abc26b5fb243693f
+simcheck.granite.b   51f541063cc42a986b221d39e72c7abc
+simcheck.asteroid.b  8dfde48390068f4218dcf1de69b4e665
+simcheck.granite.s4000 51f541063cc42a986b221d39e72c7abc
+simcheck.asteroid.s4000 32309063b89e6a77fbf382296688b9f9
+simcheck.granite.c12.b 51f541063cc42a986b221d39e72c7abc
+simcheck.asteroid.c12.b 71884988bb840298abc26b5fb243693f
+census.granite.f.r   dc947c0ff907f92289b0a4465aac6085
+state.granite.f.r    0099addfae40c8d5833a4f98b07d2049
+field.granite.f.r    ec1417351a174983b6ad00c98befe705
+simcheck.granite.f.r 51f541063cc42a986b221d39e72c7abc
+census.asteroid.f.r  db4a5f6a8f9d6126cd2087d8c5111c4e
+state.asteroid.f.r   1230d7bf4f4d407da6a59c30ffd512c6
+field.asteroid.f.r   dc920b10591816d452550482ae67530d
+simcheck.asteroid.f.r 4e1a72e526971a09ff307e56ceea0e0a

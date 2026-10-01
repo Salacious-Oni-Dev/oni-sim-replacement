@@ -1,0 +1,3 @@
+# Game builds this release supports, one per line: the SHA-256 of the game's own SimDLL.dll for
+# that build, then the build number. The installer refuses any build not listed here.
+031960f120ac1d59fd8e43f6e1a7369111c629b90c24d52186b691dfe2d8a727 744825

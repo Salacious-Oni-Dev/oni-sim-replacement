@@ -1,0 +1,21 @@
+name: Feature or API request
+description: Something a mod needs from the SDK that it does not provide.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What the mod needs to do
+      description: Describe the behaviour you want to build, not only the call you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What you tried
+      description: What the current API offers for this, and where it falls short.
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+      description: The release you are building against.

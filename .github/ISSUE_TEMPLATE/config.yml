@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: SDK guides
+    url: https://github.com/Salacious-Oni-Dev/oni-sdk-docs#guides
+    about: Installing, compatibility and writing a mod.
+  - name: Security problem
+    url: https://github.com/Salacious-Oni-Dev/oni-sim-replacement/security/advisories/new
+    about: Report it privately, not as an issue. See the Security section of CONTRIBUTING.md.

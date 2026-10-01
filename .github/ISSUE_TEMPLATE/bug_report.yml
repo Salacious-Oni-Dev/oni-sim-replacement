@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in the SDK does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The simulation library, the framework and the mods must all come from the same SDK release. Mixing releases is not supported.
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+      description: The release you installed, for example 0.1.0-alpha.1. It is the tag on the release page you downloaded from.
+    validations:
+      required: true
+  - type: input
+    id: game-build
+    attributes:
+      label: Game build
+      description: The build number shown on the game's main menu.
+    validations:
+      required: true
+  - type: dropdown
+    id: simdll
+    attributes:
+      label: Installed SimDLL.dll
+      description: "install.ps1 -Status reports this."
+      options:
+        - The SDK's replacement, from a release zip
+        - The SDK's replacement, built from source
+        - The game's own library
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Enabled mods
+      description: Every enabled mod, in the order the Mods screen lists them.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Player.log
+      description: |
+        Attach the log from the session where it happened. On Windows it is at %USERPROFILE%\AppData\LocalLow\Klei\Oxygen Not Included\Player.log. Drag the file into this box.
+    validations:
+      required: true
+  - type: textarea
+    id: save
+    attributes:
+      label: Save file
+      description: Optional. A save that shows the problem, zipped, makes it much easier to reproduce.
